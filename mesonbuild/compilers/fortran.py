@@ -14,6 +14,7 @@
 
 from pathlib import Path
 import typing as T
+import functools
 import subprocess, os
 
 from .. import coredata
@@ -164,6 +165,35 @@ class FortranCompiler(CLikeCompiler, Compiler):
         })
         return opts
 
+    def sizeof(self, typename: str, prefix: str, env: 'Environment', *,
+               extra_args: T.Optional[T.List[str]] = None,
+               dependencies: T.Optional[T.List['Dependency']] = None) -> int:
+        if extra_args is None:
+            extra_args = []
+        if self.is_cross:
+            return self.cross_sizeof(typename, prefix, env, extra_args=extra_args,
+                                     dependencies=dependencies)
+        use_list = '\n'.join([f'USE {module}' for module in prefix.split()])
+        t = f'''program p
+          {use_list}
+          implicit none
+          {typename} :: x
+          print "(I0)", storage_size(x)
+        end'''
+        res = self.run(t, env, extra_args=extra_args,
+                       dependencies=dependencies)
+        if not res.compiled:
+            return -1
+        if res.returncode != 0:
+            raise mesonlib.EnvironmentException('Could not run sizeof test binary.')
+        return int(res.stdout) // 8
+
+    @functools.lru_cache()
+    def output_is_64bit(self, env: 'Environment') -> bool:
+        '''
+        returns true if the output produced is 64-bit, false if 32-bit
+        '''
+        return self.sizeof('TYPE(C_PTR)', 'ISO_C_BINDING', env) == 8
 
 class GnuFortranCompiler(GnuCompiler, FortranCompiler):
 
